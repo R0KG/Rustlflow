@@ -1,30 +1,31 @@
 use axum::{
     Json, Router,
-    extract::Path,
+    extract::{Multipart, Path as RoutePath},
+    http::StatusCode,
     routing::{get, post},
 };
-use serde::Serialize;
 
-#[derive(serde::Deserialize)]
-struct DocumementRequest {
-    name: String,
-}
+use std::path::Path as FilePath;
+use uuid::Uuid;
 #[derive(serde::Deserialize)]
 struct CreateDatasetRequest {
     name: String,
+    format: String,
 }
 
 #[derive(serde::Serialize)]
-struct DatesetResponse {
+struct DatasetResponse {
     id: u64,
-    name: String,
+    filename: String,
+    format: String,
+    status: String,
 }
-#[derive(Serialize)]
+#[derive(serde::Serialize)]
 struct HelloResponse {
     message: String,
 }
 
-#[derive(Serialize)]
+#[derive(serde::Serialize)]
 struct HealthResponse {
     status: &'static str,
 }
@@ -43,13 +44,52 @@ async fn main() {
 
     axum::serve(listener, app).await.expect("server failed");
 }
-async fn create_dataset(Json(payload): Json<CreateDatasetRequest>) -> Json<DatesetResponse> {
-    Json(DatesetResponse {
-        id: 1,
-        name: payload.name,
-    })
+
+async fn save_file(path: &FilePath, contents: &[u8]) -> Result<(), std::io::Error> {
+    tokio::fs::write(path, contents).await
 }
-async fn hello(Path(name): Path<String>) -> Json<HelloResponse> {
+
+async fn create_dataset(
+    mut multipart: Multipart,
+) -> Result<(StatusCode, String), (StatusCode, String)> {
+    while let Some(field) = multipart.next_field().await.map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            "Invalid multipart request".to_string(),
+        )
+    })? {
+        if field.name() != Some("file") {
+            continue;
+        }
+
+        let filename = field
+            .file_name()
+            .map(str::to_owned)
+            .ok_or((StatusCode::BAD_REQUEST, "Missing filename".to_string()))?;
+
+        let bytes = field
+            .bytes()
+            .await
+            .map_err(|_| (StatusCode::BAD_REQUEST, "Could not read file".to_string()))?;
+
+        if bytes.is_empty() {
+            return Err((StatusCode::BAD_REQUEST, "File is is_empty".to_string()));
+        }
+
+        return Ok((
+            StatusCode::OK,
+            format!(
+                "Got the file with name {filename} and size: ({} bytes )",
+                bytes.len()
+            ),
+        ));
+    }
+    Err((
+        StatusCode::BAD_REQUEST,
+        "No file field provided".to_string(),
+    ))
+}
+async fn hello(RoutePath(name): RoutePath<String>) -> Json<HelloResponse> {
     Json(HelloResponse {
         message: format!("Hello, {name}"),
     })
