@@ -1,31 +1,23 @@
-mod basic;
-mod datasets;
-mod models;
-mod queries;
-mod query_engine;
-mod serialization;
-
-use axum::{
-    Router,
-    routing::{get, post},
+use rustflow::{
+    app::run_api,
+    db::connect_database,
+    nats::{JobPublisher, connect_jetstream_from_env},
+    observability::init_observability,
+    storage::storage_from_env,
 };
-use basic::{health, hello};
-use datasets::create_dataset;
-use queries::query;
 
 #[tokio::main]
-async fn main() {
-    let app = Router::new()
-        .route("/health", get(health))
-        .route("/hello/{name}", get(hello))
-        .route("/datasets", post(create_dataset))
-        .route("/queries", post(query));
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    dotenvy::dotenv().ok();
+    init_observability("rustflow-api")?;
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
-        .await
-        .expect("failed to bind address");
-
-    println!("Server running on local host 3000");
-
-    axum::serve(listener, app).await.expect("server failed");
+    let db_pool = connect_database().await?;
+    let jetstream = connect_jetstream_from_env().await?;
+    let storage = storage_from_env()?;
+    run_api(
+        db_pool,
+        JobPublisher::JetStream(Box::new(jetstream)),
+        storage,
+    )
+    .await
 }

@@ -1,0 +1,149 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: rustflow
+      POSTGRES_USER: rustflow
+      POSTGRES_PASSWORD: rustflow
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../migrations/01_create_datasets.sql:/docker-entrypoint-initdb.d/01_create_datasets.sql:ro
+      - ../migrations/02_create_jobs.sql:/docker-entrypoint-initdb.d/02_create_jobs.sql:ro
+      - ../migrations/03_add_job_leases.sql:/docker-entrypoint-initdb.d/03_add_job_leases.sql:ro
+      - ../migrations/04_create_distributed_tasks.sql:/docker-entrypoint-initdb.d/04_create_distributed_tasks.sql:ro
+      - ../migrations/05_add_object_storage_keys.sql:/docker-entrypoint-initdb.d/05_add_object_storage_keys.sql:ro
+      - ../migrations/06_add_job_idempotency.sql:/docker-entrypoint-initdb.d/06_add_job_idempotency.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rustflow -d rustflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  nats:
+    image: nats:2.14-alpine
+    command: ["-js", "-sd", "/data", "-m", "8222"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    volumes:
+      - nats_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8222/healthz >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-rustflow}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-rustflow-secret}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    depends_on:
+      minio:
+        condition: service_started
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-rustflow}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-rustflow-secret}
+      RUSTFLOW_S3_BUCKET: ${RUSTFLOW_S3_BUCKET:-rustflow}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        until mc alias set rustflow http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"; do
+          sleep 1
+        done
+        mc mb --ignore-existing "rustflow/$$RUSTFLOW_S3_BUCKET"
+
+  jaeger:
+    image: cr.jaegertracing.io/jaegertracing/jaeger:2.20.0
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: api
+    environment:
+      DATABASE_URL: postgresql://rustflow:rustflow@postgres:5432/rustflow
+      NATS_URL: nats://nats:4222
+      RUST_LOG: rustflow=info
+      RUSTFLOW_ROWS_PER_PARTITION: ${RUSTFLOW_ROWS_PER_PARTITION:-10000}
+      RUSTFLOW_STORAGE_BACKEND: minio
+      RUSTFLOW_S3_ENDPOINT: http://minio:9000
+      RUSTFLOW_S3_BUCKET: ${RUSTFLOW_S3_BUCKET:-rustflow}
+      RUSTFLOW_S3_REGION: us-east-1
+      RUSTFLOW_S3_ACCESS_KEY: ${MINIO_ROOT_USER:-rustflow}
+      RUSTFLOW_S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-rustflow-secret}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      jaeger:
+        condition: service_started
+    ports:
+      - "3000:3000"
+    volumes:
+      - datasets_data:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:3000/health >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: worker
+    environment:
+      DATABASE_URL: postgresql://rustflow:rustflow@postgres:5432/rustflow
+      NATS_URL: nats://nats:4222
+      RUST_LOG: rustflow=info
+      RUSTFLOW_STORAGE_BACKEND: minio
+      RUSTFLOW_S3_ENDPOINT: http://minio:9000
+      RUSTFLOW_S3_BUCKET: ${RUSTFLOW_S3_BUCKET:-rustflow}
+      RUSTFLOW_S3_REGION: us-east-1
+      RUSTFLOW_S3_ACCESS_KEY: ${MINIO_ROOT_USER:-rustflow}
+      RUSTFLOW_S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-rustflow-secret}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      jaeger:
+        condition: service_started
+    volumes:
+      - datasets_data:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "kill -0 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  nats_data:
+  datasets_data:
+  minio_data:

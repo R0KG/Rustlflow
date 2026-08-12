@@ -1,0 +1,8 @@
+target
+data
+.git
+.env
+.env.test
+*.log
+docs/test_matrix.md
+docs/test_plan.md
