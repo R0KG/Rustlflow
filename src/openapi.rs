@@ -6,7 +6,7 @@ use utoipa::OpenApi;
 
 use crate::{
     basic::{__path_health, __path_hello},
-    datasets::__path_create_dataset,
+    datasets::{__path_create_dataset, __path_list_datasets},
     errors::ErrorResponse,
     jobs::{
         __path_cancel_job_handler, __path_create_job_handler, __path_get_job_result,
@@ -14,8 +14,9 @@ use crate::{
     },
     metrics::__path_metrics_handler,
     models::{
-        CreateJobRequest, CreateJobResponse, DatasetResponse, HealthResponse, HelloResponse,
-        JobResultResponse, JobStatusResponse, QueryRequest, QueryResponse,
+        CreateJobRequest, CreateJobResponse, DatasetListResponse, DatasetResponse, DatasetSummary,
+        HealthResponse, HelloResponse, JobResultResponse, JobStatusResponse, QueryRequest,
+        QueryResponse,
     },
     queries::__path_query,
 };
@@ -31,6 +32,7 @@ use crate::{
         health,
         hello,
         create_dataset,
+        list_datasets,
         query,
         create_job_handler,
         get_job_status,
@@ -41,7 +43,9 @@ use crate::{
     components(schemas(
         CreateJobRequest,
         CreateJobResponse,
+        DatasetListResponse,
         DatasetResponse,
+        DatasetSummary,
         ErrorResponse,
         HealthResponse,
         HelloResponse,

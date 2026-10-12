@@ -1,14 +1,92 @@
-use axum::{Json, extract::Multipart, http::StatusCode};
+use axum::{
+    Json,
+    extract::{Multipart, Query, State, rejection::QueryRejection},
+    http::StatusCode,
+};
+use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::{
     app::AppState,
     errors::{AppError, ErrorResponse},
-    models::DatasetResponse,
+    models::{DatasetListResponse, DatasetResponse, DatasetSummary},
     storage::dataset_source_key,
 };
 
 const MAX_UPLOAD_BYTES: usize = 50 * 1024 * 1024;
+const DEFAULT_DATASET_PAGE_SIZE: i64 = 20;
+const MAX_DATASET_PAGE_SIZE: i64 = 100;
+
+#[derive(Deserialize)]
+pub struct DatasetListQuery {
+    limit: Option<i64>,
+    offset: Option<i64>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/datasets",
+    params(
+        ("limit" = Option<i64>, Query, description = "Page size from 1 to 100; defaults to 20"),
+        ("offset" = Option<i64>, Query, description = "Number of datasets to skip; defaults to 0")
+    ),
+    responses(
+        (status = 200, description = "Datasets ordered from newest to oldest", body = DatasetListResponse),
+        (status = 400, description = "Invalid pagination parameters", body = ErrorResponse),
+        (status = 500, description = "Database failure", body = ErrorResponse)
+    ),
+    tag = "datasets"
+)]
+pub async fn list_datasets(
+    State(state): State<AppState>,
+    query: Result<Query<DatasetListQuery>, QueryRejection>,
+) -> Result<Json<DatasetListResponse>, AppError> {
+    let Query(query) = query
+        .map_err(|_| AppError::BadRequest("Invalid dataset pagination parameters".to_string()))?;
+    let limit = query.limit.unwrap_or(DEFAULT_DATASET_PAGE_SIZE);
+    if !(1..=MAX_DATASET_PAGE_SIZE).contains(&limit) {
+        return Err(AppError::BadRequest(
+            "Dataset limit must be between 1 and 100".to_string(),
+        ));
+    }
+    let offset = query.offset.unwrap_or(0);
+    if offset < 0 {
+        return Err(AppError::BadRequest(
+            "Dataset offset cannot be negative".to_string(),
+        ));
+    }
+
+    let rows: Vec<(Uuid, String, String, String, i64)> = sqlx::query_as(
+        "SELECT id, filename, format, status, size_bytes
+         FROM datasets
+         ORDER BY created_at DESC, id DESC
+         LIMIT $1 OFFSET $2",
+    )
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|_| AppError::Internal("Could not list datasets".to_string()))?;
+
+    let datasets = rows
+        .into_iter()
+        .map(
+            |(id, filename, format, status, size_bytes)| DatasetSummary {
+                id: id.to_string(),
+                filename,
+                format,
+                status,
+                size_bytes,
+            },
+        )
+        .collect();
+
+    Ok(Json(DatasetListResponse {
+        datasets,
+        limit,
+        offset,
+    }))
+}
 
 #[utoipa::path(
     post,

@@ -25,6 +25,31 @@ Send one non-empty CSV file in the file field.
 The endpoint returns 201 on success and 400 for an empty, invalid, or
 non-CSV upload.
 
+## List datasets
+
+~~~http
+GET /datasets?limit=20&offset=0
+~~~
+
+Datasets are ordered from newest to oldest. The `limit` defaults to 20 and
+must be between 1 and 100. The `offset` defaults to 0 and cannot be negative.
+
+~~~json
+{
+  "datasets": [
+    {
+      "id": "dataset-uuid",
+      "filename": "events.csv",
+      "format": "csv",
+      "status": "stored",
+      "size_bytes": 1234
+    }
+  ],
+  "limit": 20,
+  "offset": 0
+}
+~~~
+
 ## Create a job
 
 ~~~http

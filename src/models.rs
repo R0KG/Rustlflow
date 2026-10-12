@@ -6,6 +6,22 @@ pub struct DatasetResponse {
     pub status: String,
 }
 
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct DatasetSummary {
+    pub id: String,
+    pub filename: String,
+    pub format: String,
+    pub status: String,
+    pub size_bytes: i64,
+}
+
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct DatasetListResponse {
+    pub datasets: Vec<DatasetSummary>,
+    pub limit: i64,
+    pub offset: i64,
+}
+
 #[derive(serde::Deserialize, utoipa::ToSchema)]
 pub struct QueryRequest {
     pub dataset_id: String,

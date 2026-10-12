@@ -1,7 +1,7 @@
 use crate::{
     app::AppState,
     basic::{health, hello},
-    datasets::create_dataset,
+    datasets::{create_dataset, list_datasets},
     jobs::{cancel_job_handler, create_job_handler, get_job_result, get_job_status},
     metrics::metrics_handler,
     observability::request_context,
@@ -23,7 +23,7 @@ pub fn router_with_state(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/openapi.yaml", get(openapi))
         .route("/hello/{name}", get(hello))
-        .route("/datasets", post(create_dataset))
+        .route("/datasets", get(list_datasets).post(create_dataset))
         .route("/queries", post(query))
         .route("/jobs", post(create_job_handler))
         .route("/jobs/{job_id}", get(get_job_status))
